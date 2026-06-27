@@ -1,0 +1,48 @@
+# Auto-refresh real fund data from Yahoo Finance and commit funds-data.json.
+# Runs on GitHub's servers (so no CORS problem) every weekday evening, plus a
+# manual "Run workflow" button. Does nothing until FUND_MAP in generate_data.py
+# has at least one fund -> ISIN/symbol entry (so it never clobbers your repo blank).
+name: Update fund data
+
+on:
+  schedule:
+    - cron: "30 23 * * 1-5"   # 23:30 UTC, Mon-Fri (after fund NAVs publish)
+  workflow_dispatch:           # adds a manual "Run workflow" button
+
+permissions:
+  contents: write              # lets the job commit funds-data.json back
+
+concurrency:
+  group: update-funds-data
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install yfinance pandas
+
+      - name: Generate snapshot
+        run: python generate_data.py
+
+      - name: Commit if changed
+        run: |
+          if [ -n "$(git status --porcelain funds-data.json)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add funds-data.json
+            git commit -m "Update funds-data.json (Yahoo Finance) [skip ci]"
+            git push
+            echo "Committed updated snapshot."
+          else
+            echo "No changes to funds-data.json."
+          fi
